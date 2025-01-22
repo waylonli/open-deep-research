@@ -38,8 +38,12 @@ export const CONFIG = {
       enabled: true,
       models: {
         'gpt-4o': {
-          enabled: false,
+          enabled: true,
           label: 'GPT-4o',
+        },
+        'gpt-4o-mini': {
+          enabled: true,
+          label: 'GPT-4o-mini',
         },
         'o1-mini': {
           enabled: false,
