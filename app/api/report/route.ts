@@ -179,6 +179,8 @@ Important: Do not use phrases like "Source 1" or "According to Source 2". Instea
 
     try {
       let response: string | null = null
+      // print out the model
+      console.log('Model:', model)
       switch (model) {
         case 'gemini-flash':
           response = await generateWithGemini(systemPrompt, 'gemini-flash')
@@ -194,6 +196,9 @@ Important: Do not use phrases like "Source 1" or "According to Source 2". Instea
           break
         case 'gpt-4o':
           response = await generateWithOpenAI(systemPrompt, 'gpt-4o')
+          break
+        case 'gpt-4o-mini':
+          response = await generateWithOpenAI(systemPrompt, 'gpt-4o-mini')
           break
         case 'o1-mini':
           response = await generateWithOpenAI(systemPrompt, 'o1-mini')
