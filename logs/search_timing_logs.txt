@@ -1,0 +1,2 @@
+********** Time spent on Search API fetch: 563.04ms **********
+********** Total time for search request: 568.29ms **********

@@ -1,0 +1,3 @@
+********** Time spent fetching content for URL (https://en.wikipedia.org/wiki/Jay_Chou): 3180.95ms **********
+********** Time spent fetching content for URL (https://www.imdb.com/name/nm1727100/bio/): 793.73ms **********
+********** Time spent fetching content for URL (https://www.discoverwalks.com/blog/china/top-10-interesting-facts-about-jaychou/): 1676.38ms **********

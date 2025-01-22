@@ -1,22 +1,33 @@
-import { NextResponse } from 'next/server'
+import { NextResponse } from 'next/server';
 import {
   geminiModel,
   geminiFlashModel,
   geminiFlashThinkingModel,
-} from '@/lib/gemini'
-import { reportContentRatelimit } from '@/lib/redis'
-import { type Article } from '@/types'
-import { CONFIG } from '@/lib/config'
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
+} from '@/lib/gemini';
+import { reportContentRatelimit } from '@/lib/redis';
+import { type Article } from '@/types';
+import { CONFIG } from '@/lib/config';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
+import fs from 'fs';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
-})
+});
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
-})
+});
+
+function logTimeToFile(message: string) {
+  const logFilePath = './logs/report_timing_logs.txt';
+  fs.appendFileSync(logFilePath, `${message}\n`);
+}
+
+function logResponseToFile(response: string) {
+  const responseFilePath = './logs/llm_responses.txt';
+  fs.appendFileSync(responseFilePath, `${response}\n`);
+}
 
 type PlatformModel =
   | 'google__gemini-flash'
@@ -26,22 +37,27 @@ type PlatformModel =
   | 'o1-mini'
   | 'o1'
   | 'sonnet-3.5'
-  | 'haiku-3.5'
+  | 'haiku-3.5';
 
 async function generateWithGemini(systemPrompt: string, model: string) {
+  const startTime = performance.now();
+  let result;
   if (model === 'gemini-flash-thinking') {
-    const result = await geminiFlashThinkingModel.generateContent(systemPrompt)
-    return result.response.text()
+    result = await geminiFlashThinkingModel.generateContent(systemPrompt);
   } else if (model === 'gemini-exp') {
-    const result = await geminiModel.generateContent(systemPrompt)
-    return result.response.text()
+    result = await geminiModel.generateContent(systemPrompt);
   } else {
-    const result = await geminiFlashModel.generateContent(systemPrompt)
-    return result.response.text()
+    result = await geminiFlashModel.generateContent(systemPrompt);
   }
+  const endTime = performance.now();
+  const timeLog = `********** Time spent in generateWithGemini (${model}): ${(endTime - startTime).toFixed(2)}ms **********`;
+  console.log(timeLog);
+  logTimeToFile(timeLog);
+  return result.response.text();
 }
 
 async function generateWithOpenAI(systemPrompt: string, model: string) {
+  const startTime = performance.now();
   const response = await openai.chat.completions.create({
     model,
     messages: [
@@ -50,11 +66,17 @@ async function generateWithOpenAI(systemPrompt: string, model: string) {
         content: systemPrompt,
       },
     ],
-  })
-  return response.choices[0].message.content
+  });
+  const endTime = performance.now();
+  const timeLog = `********** Time spent in generateWithOpenAI (${model}): ${(endTime - startTime).toFixed(2)}ms **********`;
+  console.log(timeLog);
+  logTimeToFile(timeLog);
+  logResponseToFile(JSON.stringify(response));
+  return response.choices[0].message.content;
 }
 
 async function generateWithAnthropic(systemPrompt: string, model: string) {
+  const startTime = performance.now();
   const response = await anthropic.messages.create({
     model,
     max_tokens: 3500,
@@ -65,62 +87,69 @@ async function generateWithAnthropic(systemPrompt: string, model: string) {
         content: systemPrompt,
       },
     ],
-  })  
-  return response.content[0].text || ''
+  });
+  const endTime = performance.now();
+  const timeLog = `********** Time spent in generateWithAnthropic (${model}): ${(endTime - startTime).toFixed(2)}ms **********`;
+  console.log(timeLog);
+  logTimeToFile(timeLog);
+  logResponseToFile(JSON.stringify(response));
+  return response.content[0].text || '';
 }
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
+    const startTime = performance.now();
+    const body = await request.json();
     const {
       selectedResults,
       sources,
       prompt,
       platformModel = 'google-gemini-flash',
     } = body as {
-      selectedResults: Article[]
-      sources: any[]
-      prompt: string
-      platformModel: PlatformModel
-    }
+      selectedResults: Article[];
+      sources: any[];
+      prompt: string;
+      platformModel: PlatformModel;
+    };
 
-    // Only check rate limit if enabled
     if (CONFIG.rateLimits.enabled) {
-      const { success } = await reportContentRatelimit.limit('report')
+      const rateLimitStart = performance.now();
+      const { success } = await reportContentRatelimit.limit('report');
+      const rateLimitEnd = performance.now();
+      const rateLimitTimeLog = `********** Time spent checking rate limits: ${(rateLimitEnd - rateLimitStart).toFixed(2)}ms **********`;
+      console.log(rateLimitTimeLog);
+      logTimeToFile(rateLimitTimeLog);
       if (!success) {
         return NextResponse.json(
           { error: 'Too many requests' },
           { status: 429 }
-        )
+        );
       }
     }
 
-    // Check if selected platform is enabled
-    const platform = platformModel.split('__')[0]
-    const model = platformModel.split('__')[1]
-
+    const platform = platformModel.split('__')[0];
+    const model = platformModel.split('__')[1];
     const platformConfig =
-      CONFIG.platforms[platform as keyof typeof CONFIG.platforms]
+      CONFIG.platforms[platform as keyof typeof CONFIG.platforms];
     if (!platformConfig?.enabled) {
       return NextResponse.json(
         { error: `${platform} platform is not enabled` },
         { status: 400 }
-      )
+      );
     }
 
-    // Check if selected model exists and is enabled
-    const modelConfig = (platformConfig as any).models[model]
+    const modelConfig = (platformConfig as any).models[model];
     if (!modelConfig) {
       return NextResponse.json(
         { error: `${model} model does not exist` },
         { status: 400 }
-      )
+      );
     }
     if (!modelConfig.enabled) {
       return NextResponse.json(
         { error: `${model} model is disabled` },
         { status: 400 }
-      )
+      );
     }
 
     const generateSystemPrompt = (articles: Article[], userPrompt: string) => {
@@ -170,97 +199,103 @@ Use markdown formatting in the content to improve readability:
 - Use > for quotations
 - Use --- for horizontal rules where appropriate
 
-Important: Do not use phrases like "Source 1" or "According to Source 2". Instead, integrate the information naturally into the narrative or reference sources by their titles when necessary.`
-    }
+Important: Do not use phrases like "Source 1" or "According to Source 2". Instead, integrate the information naturally into the narrative or reference sources by their titles when necessary.`;
+    };
 
-    const systemPrompt = generateSystemPrompt(selectedResults, prompt)
+    const systemPrompt = generateSystemPrompt(selectedResults, prompt);
 
-    // console.log('Sending prompt to model:', systemPrompt)
+    console.log('Sending prompt to model:', systemPrompt);
+
+    let response: string | null = null;
+    const modelStartTime = performance.now();
 
     try {
-      let response: string | null = null
-      // print out the model
-      console.log('Model:', model)
       switch (model) {
         case 'gemini-flash':
-          response = await generateWithGemini(systemPrompt, 'gemini-flash')
-          break
+          response = await generateWithGemini(systemPrompt, 'gemini-flash');
+          break;
         case 'gemini-flash-thinking':
           response = await generateWithGemini(
             systemPrompt,
             'gemini-flash-thinking'
-          )
-          break
+          );
+          break;
         case 'gemini-exp':
-          response = await generateWithGemini(systemPrompt, 'gemini-exp')
-          break
+          response = await generateWithGemini(systemPrompt, 'gemini-exp');
+          break;
         case 'gpt-4o':
-          response = await generateWithOpenAI(systemPrompt, 'gpt-4o')
-          break
+          response = await generateWithOpenAI(systemPrompt, 'gpt-4o');
+          break;
         case 'gpt-4o-mini':
-          response = await generateWithOpenAI(systemPrompt, 'gpt-4o-mini')
-          break
+          response = await generateWithOpenAI(systemPrompt, 'gpt-4o-mini');
+          break;
         case 'o1-mini':
-          response = await generateWithOpenAI(systemPrompt, 'o1-mini')
-          break
+          response = await generateWithOpenAI(systemPrompt, 'o1-mini');
+          break;
         case 'o1':
-          response = await generateWithOpenAI(systemPrompt, 'o1')
-          break
+          response = await generateWithOpenAI(systemPrompt, 'o1');
+          break;
         case 'sonnet-3.5':
           response = await generateWithAnthropic(
             systemPrompt,
             'claude-3-5-sonnet-latest'
-          )
-          break
+          );
+          break;
         case 'haiku-3.5':
           response = await generateWithAnthropic(
             systemPrompt,
             'claude-3-5-haiku-latest'
-          )
-          break
+          );
+          break;
         default:
-          throw new Error('Invalid platform/model combination')
+          throw new Error('Invalid platform/model combination');
       }
+    } finally {
+      const modelEndTime = performance.now();
+      const modelTimeLog = `********** Time spent on model generation (${model}): ${(modelEndTime - modelStartTime).toFixed(2)}ms **********`;
+      console.log(modelTimeLog);
+      logTimeToFile(modelTimeLog);
+    }
 
-      if (!response) {
-        throw new Error('No response from model')
-      }
+    if (!response) {
+      throw new Error('No response from model');
+    }
 
-      // Extract JSON using regex
-      const jsonMatch = response.match(/\{[\s\S]*\}/)?.[0]
-      if (!jsonMatch) {
-        console.error('No JSON found in response')
-        return NextResponse.json(
-          { error: 'Invalid report format' },
-          { status: 500 }
-        )
-      }
+    logResponseToFile(response);
 
-      try {
-        const reportData = JSON.parse(jsonMatch)
-        // Add sources to the report data
-        reportData.sources = sources
-        console.log('Parsed report data:', reportData)
-        return NextResponse.json(reportData)
-      } catch (parseError) {
-        console.error('JSON parsing error:', parseError)
-        return NextResponse.json(
-          { error: 'Failed to parse report format' },
-          { status: 500 }
-        )
-      }
-    } catch (error) {
-      console.error('Model generation error:', error)
+    const jsonMatch = response.match(/\{[\s\S]*\}/)?.[0];
+    if (!jsonMatch) {
+      console.error('No JSON found in response');
       return NextResponse.json(
-        { error: 'Failed to generate report content' },
+        { error: 'Invalid report format' },
         { status: 500 }
-      )
+      );
+    }
+
+    try {
+      const reportData = JSON.parse(jsonMatch);
+
+      reportData.sources = sources;
+      console.log('Parsed report data:', reportData);
+      const overallEndTime = performance.now();
+      const overallTimeLog = `********** Total time for report generation: ${(overallEndTime - startTime).toFixed(2)}ms **********`;
+      console.log(overallTimeLog);
+      logTimeToFile(overallTimeLog);
+
+      return NextResponse.json(reportData);
+    } catch (parseError) {
+      console.error('JSON parsing error:', parseError);
+      return NextResponse.json(
+        { error: 'Failed to parse report format' },
+        { status: 500 }
+      );
     }
   } catch (error) {
-    console.error('Report generation error:', error)
+    console.error('Report generation error:', error);
+    logTimeToFile(`Report generation error: ${error}`);
     return NextResponse.json(
       { error: 'Failed to generate report' },
       { status: 500 }
-    )
+    );
   }
 }

@@ -1,0 +1,3 @@
+********** Time spent in generateWithOpenAI (gpt-4o-mini): 38867.15ms **********
+********** Time spent on model generation (gpt-4o-mini): 38868.81ms **********
+********** Total time for report generation: 38884.88ms **********
